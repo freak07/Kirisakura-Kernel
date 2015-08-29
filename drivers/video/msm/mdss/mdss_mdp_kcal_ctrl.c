@@ -22,15 +22,6 @@
 #include <linux/init.h>
 #include <linux/module.h>
 
-#if defined(CONFIG_MMI_PANEL_NOTIFICATIONS) && defined(CONFIG_FB)
-#include <mach/mmi_panel_notifier.h>
-#include <linux/notifier.h>
-#include <linux/fb.h>
-#elif defined(CONFIG_FB)
-#include <linux/notifier.h>
-#include <linux/fb.h>
-#endif
-
 #include "mdss_mdp.h"
 
 #define DEF_PCC 0x100
@@ -38,13 +29,6 @@
 #define PCC_ADJ 0x80
 
 struct kcal_lut_data {
-#if defined(CONFIG_MMI_PANEL_NOTIFICATIONS) && defined(CONFIG_FB)
-	struct mmi_notifier panel_nb;
-#elif defined(CONFIG_FB)
-	struct device dev;
-	struct notifier_block panel_nb;
-#endif
-	bool queue_changes;
 	int red;
 	int green;
 	int blue;
@@ -556,20 +540,6 @@ static DEVICE_ATTR(kcal_val, S_IWUSR | S_IRUGO, kcal_val_show, kcal_val_store);
 static DEVICE_ATTR(kcal_cont, S_IWUSR | S_IRUGO, kcal_cont_show,
 	kcal_cont_store);
 
-static int mdss_mdp_kcal_update_queue(struct device *dev)
-{
-	struct kcal_lut_data *lut_data = dev_get_drvdata(dev);
-
-	if (lut_data->queue_changes) {
-		mdss_mdp_kcal_update_pcc(lut_data);
-		mdss_mdp_kcal_update_pa(lut_data);
-		mdss_mdp_kcal_update_igc(lut_data);
-		lut_data->queue_changes = false;
-	}
-
-	return 0;
-}
-
 static int kcal_ctrl_probe(struct platform_device *pdev)
 {
 	int ret;
@@ -595,8 +565,6 @@ static int kcal_ctrl_probe(struct platform_device *pdev)
 	lut_data->val = DEF_PA;
 	lut_data->cont = DEF_PA;
 
-	lut_data->queue_changes = false;
-
 	mdss_mdp_kcal_update_pcc(lut_data);
 	mdss_mdp_kcal_update_pa(lut_data);
 	mdss_mdp_kcal_update_igc(lut_data);
@@ -616,12 +584,10 @@ static int kcal_ctrl_probe(struct platform_device *pdev)
 	}
 
 	return 0;
-}	
+}
 
 static int kcal_ctrl_remove(struct platform_device *pdev)
 {
-	struct kcal_lut_data *lut_data = platform_get_drvdata(pdev);
-
 	device_remove_file(&pdev->dev, &dev_attr_kcal);
 	device_remove_file(&pdev->dev, &dev_attr_kcal_min);
 	device_remove_file(&pdev->dev, &dev_attr_kcal_enable);
@@ -630,12 +596,6 @@ static int kcal_ctrl_remove(struct platform_device *pdev)
 	device_remove_file(&pdev->dev, &dev_attr_kcal_hue);
 	device_remove_file(&pdev->dev, &dev_attr_kcal_val);
 	device_remove_file(&pdev->dev, &dev_attr_kcal_cont);
-
-#if defined(CONFIG_MMI_PANEL_NOTIFICATIONS)
-	mmi_panel_unregister_notifier(&lut_data->panel_nb);
-#elif defined(CONFIG_FB)
-	fb_unregister_client(&lut_data->panel_nb);
-#endif
 
 	return 0;
 }
