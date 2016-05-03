@@ -10002,7 +10002,7 @@ static int tasha_codec_ec_buf_mux_enable(struct snd_soc_dapm_widget *w,
 					 struct snd_kcontrol *kcontrol,
 					 int event)
 {
-	struct snd_soc_codec *codec = w->codec;
+	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(w->dapm);
 
 	dev_dbg(codec->dev, "%s: event = %d name = %s\n",
 		__func__, event, w->name);
@@ -10010,14 +10010,14 @@ static int tasha_codec_ec_buf_mux_enable(struct snd_soc_dapm_widget *w,
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
 		snd_soc_write(codec, WCD9335_CPE_SS_EC_BUF_INT_PERIOD, 0x3B);
-		snd_soc_update_bits(codec, WCD9335_CPE_SS_CFG, 0x08, 0x08);
+		snd_soc_update_bits(codec, WCD9335_CPE_SS_CFG, 0x68, 0x28);
 		snd_soc_update_bits(codec, WCD9335_CDC_IF_ROUTER_TX_MUX_CFG0,
 				    0x08, 0x08);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		snd_soc_update_bits(codec, WCD9335_CDC_IF_ROUTER_TX_MUX_CFG0,
 				    0x08, 0x00);
-		snd_soc_update_bits(codec, WCD9335_CPE_SS_CFG, 0x08, 0x00);
+		snd_soc_update_bits(codec, WCD9335_CPE_SS_CFG, 0x68, 0x40);
 		snd_soc_write(codec, WCD9335_CPE_SS_EC_BUF_INT_PERIOD, 0x00);
 		break;
 	}
