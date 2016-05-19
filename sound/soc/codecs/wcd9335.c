@@ -5736,6 +5736,18 @@ static u32 tasha_get_dmic_sample_rate(struct snd_soc_codec *codec,
 		tx_stream_fs = snd_soc_read(codec, tx_fs_reg) & 0x0F;
 		dmic_fs = tx_stream_fs <= 4 ? WCD9XXX_DMIC_SAMPLE_RATE_2P4MHZ :
 					WCD9XXX_DMIC_SAMPLE_RATE_4P8MHZ;
+
+		/*
+		 * Check for ECPP path selection and DEC1 not connected to
+		 * any other audio path to apply ECPP DMIC sample rate
+		 */
+		if ((adc_mux_index == 1) &&
+		    ((snd_soc_read(codec, WCD9335_CPE_SS_US_EC_MUX_CFG)
+				   & 0x0F) == 0x0A) &&
+		    ((snd_soc_read(codec, WCD9335_CDC_IF_ROUTER_TX_MUX_CFG0)
+				   & 0x0C) == 0x00)) {
+			dmic_fs = pdata->ecpp_dmic_sample_rate;
+		}
 	} else {
 		dmic_fs = pdata->dmic_sample_rate;
 	}
