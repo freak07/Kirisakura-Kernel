@@ -194,7 +194,7 @@ void wcd_clsh_imped_config(struct snd_soc_codec *codec, int imped, bool reset)
 		return;
 	}
 	index = get_impedance_index(imped);
-	if (index >= ARRAY_SIZE(imped_index)) {
+	if (index >= (ARRAY_SIZE(imped_index) - 1)) {
 		pr_debug("%s, impedance not in range = %d\n", __func__, imped);
 		return;
 	}

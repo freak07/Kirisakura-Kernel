@@ -4336,7 +4336,7 @@ static int tasha_codec_hphl_dac_event(struct snd_soc_dapm_widget *w,
 	int hph_mode = tasha->hph_mode;
 	u8 dem_inp;
 	int ret = 0;
-	uint32_t impedl, impedr;
+	uint32_t impedl = 0, impedr = 0;
 
 	dev_dbg(codec->dev, "%s wname: %s event: %d hph_mode: %d\n", __func__,
 		w->name, event, hph_mode);
@@ -4375,11 +4375,9 @@ static int tasha_codec_hphl_dac_event(struct snd_soc_dapm_widget *w,
 		if (!ret) {
 			wcd_clsh_imped_config(codec, impedl, false);
 			set_bit(CLASSH_CONFIG, &tasha->status_mask);
-		} else {
+		} else
 			dev_dbg(codec->dev, "%s: Failed to get mbhc impedance %d\n",
 						__func__, ret);
-			ret = 0;
-		}
 
 
 		break;
