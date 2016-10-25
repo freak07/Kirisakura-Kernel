@@ -137,15 +137,8 @@
 static DECLARE_WAIT_QUEUE_HEAD(syn_data_ready_wq);
 #endif
 
-#ifdef CONFIG_WAKE_GESTURES
-struct synaptics_rmi4_data *gl_rmi4_data;
-
-bool scr_suspended(void)
-{
-	struct synaptics_rmi4_data *rmi4_data = gl_rmi4_data;
-	return rmi4_data->suspend;
-}
-#endif
+static bool wakeup_gesture_changed = false;
+static bool wakeup_gesture_temp;
 
 static int synaptics_rmi4_check_status(struct synaptics_rmi4_data *rmi4_data,
 		bool *was_in_bl_mode);
@@ -1102,8 +1095,14 @@ static ssize_t synaptics_rmi4_wake_gesture_store(struct device *dev,
 
 	input = input > 0 ? 1 : 0;
 
-	if (rmi4_data->f11_wakeup_gesture || rmi4_data->f12_wakeup_gesture)
-		rmi4_data->enable_wakeup_gesture = input;
+	if (rmi4_data->f11_wakeup_gesture || rmi4_data->f12_wakeup_gesture) {
+		if (rmi4_data->suspend) { 
+			wakeup_gesture_changed = true;
+			wakeup_gesture_temp = input;
+		} else {
+			rmi4_data->enable_wakeup_gesture = input;
+		}
+	}
 
 	return count;
 }
@@ -6064,12 +6063,10 @@ exit:
 
 	rmi4_data->suspend = false;
 
-#ifdef CONFIG_WAKE_GESTURES
-	if (wg_changed) {
-		wg_switch = wg_switch_temp;
-		wg_changed = false;
+	if (wakeup_gesture_changed) {
+		rmi4_data->enable_wakeup_gesture = wakeup_gesture_temp;
+		wakeup_gesture_changed = false;
 	}
-#endif
 
 	return 0;
 }
