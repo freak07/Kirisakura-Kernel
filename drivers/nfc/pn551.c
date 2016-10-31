@@ -409,7 +409,6 @@ static long pn551_dev_ioctl(struct file *filp,
 			gpio_set_value(pni->firm_gpio, 0);
 			pn551_Enable();
 			msleep(50);
-			is_debug = 1;
 			s_wdcmd_cnt = 0;
 			I("%s pn551_Enable, set is_debug = %d, s_wdcmd_cnt : %d\n", __func__, is_debug, s_wdcmd_cnt);
 		} else  if (arg == 0) {
