@@ -19,7 +19,7 @@
 #include <linux/qpnp/qpnp-adc.h>
 
 #define BATT_LOG(x...) do { \
-pr_debug("[BATT] " x); \
+pr_err("[BATT] " x); \
 } while (0)
 
 #define BATT_ERR(x...) do { \
