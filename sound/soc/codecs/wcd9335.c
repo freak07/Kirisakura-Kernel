@@ -818,7 +818,6 @@ struct tasha_priv {
 				      enum wcd9335_codec_event);
 	int spkr_gain_offset;
 	int spkr_mode;
-	int ear_spkr_gain;
 	struct hpf_work tx_hpf_work[TASHA_NUM_DECIMATORS];
 	struct tx_mute_work tx_mute_dwork[TASHA_NUM_DECIMATORS];
 	int hph_l_gain;
@@ -2945,12 +2944,6 @@ static int tasha_codec_enable_slimrx(struct snd_soc_dapm_widget *w,
 					      dai->rate, dai->bit_width,
 					      &dai->grph);
 		break;
-	case SND_SOC_DAPM_PRE_PMD:
-		if (!test_bit(SB_CLK_GEAR, &tasha_p->status_mask)) {
-			tasha_codec_vote_max_bw(codec, true);
-			set_bit(SB_CLK_GEAR, &tasha_p->status_mask);
-		}
-		break;
 	case SND_SOC_DAPM_POST_PMD:
 		tasha_codec_vote_max_bw(codec, true);
 		ret = wcd9xxx_disconnect_port(core, &dai->wcd9xxx_ch_list,
@@ -4388,6 +4381,8 @@ static int tasha_codec_hphl_dac_event(struct snd_soc_dapm_widget *w,
 		} else
 			dev_dbg(codec->dev, "%s: Failed to get mbhc impedance %d\n",
 						__func__, ret);
+
+
 		break;
 	case SND_SOC_DAPM_POST_PMU:
 		/* 1000us required as per HW requirement */
@@ -4898,58 +4893,6 @@ static int tasha_codec_enable_swr(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
-static int tasha_codec_config_ear_spkr_gain(struct snd_soc_codec *codec,
-					    int event, int gain_reg)
-{
-	int comp_gain_offset, val;
-	struct tasha_priv *tasha = snd_soc_codec_get_drvdata(codec);
-
-	switch (tasha->spkr_mode) {
-	/* Compander gain in SPKR_MODE1 case is 12 dB */
-	case SPKR_MODE_1:
-		comp_gain_offset = -12;
-		break;
-	/* Default case compander gain is 15 dB */
-	default:
-		comp_gain_offset = -15;
-		break;
-	}
-
-	switch (event) {
-	case SND_SOC_DAPM_POST_PMU:
-		/* Apply ear spkr gain only if compander is enabled */
-		if (tasha->comp_enabled[COMPANDER_7] &&
-		    (gain_reg == WCD9335_CDC_RX7_RX_VOL_CTL ||
-		     gain_reg == WCD9335_CDC_RX7_RX_VOL_MIX_CTL) &&
-		    (tasha->ear_spkr_gain != 0)) {
-			/* For example, val is -8(-12+5-1) for 4dB of gain */
-			val = comp_gain_offset + tasha->ear_spkr_gain - 1;
-			snd_soc_write(codec, gain_reg, val);
-
-			dev_dbg(codec->dev, "%s: RX7 Volume %d dB\n",
-				__func__, val);
-		}
-		break;
-	case SND_SOC_DAPM_POST_PMD:
-		/*
-		 * Reset RX7 volume to 0 dB if compander is enabled and
-		 * ear_spkr_gain is non-zero.
-		 */
-		if (tasha->comp_enabled[COMPANDER_7] &&
-		    (gain_reg == WCD9335_CDC_RX7_RX_VOL_CTL ||
-		     gain_reg == WCD9335_CDC_RX7_RX_VOL_MIX_CTL) &&
-		    (tasha->ear_spkr_gain != 0)) {
-			snd_soc_write(codec, gain_reg, 0x0);
-
-			dev_dbg(codec->dev, "%s: Reset RX7 Volume to 0 dB\n",
-				__func__);
-		}
-		break;
-	}
-
-	return 0;
-}
-
 static int tasha_codec_enable_mix_path(struct snd_soc_dapm_widget *w,
 		struct snd_kcontrol *kcontrol, int event)
 {
@@ -5017,7 +4960,6 @@ static int tasha_codec_enable_mix_path(struct snd_soc_dapm_widget *w,
 		val = snd_soc_read(codec, gain_reg);
 		val += offset_val;
 		snd_soc_write(codec, gain_reg, val);
-		tasha_codec_config_ear_spkr_gain(codec, event, gain_reg);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		if ((tasha->spkr_gain_offset == RX_GAIN_OFFSET_M1P5_DB) &&
@@ -5040,7 +4982,6 @@ static int tasha_codec_enable_mix_path(struct snd_soc_dapm_widget *w,
 			val += offset_val;
 			snd_soc_write(codec, gain_reg, val);
 		}
-		tasha_codec_config_ear_spkr_gain(codec, event, gain_reg);
 		break;
 	};
 
@@ -5248,7 +5189,6 @@ static int tasha_codec_enable_interpolator(struct snd_soc_dapm_widget *w,
 		val = snd_soc_read(codec, gain_reg);
 		val += offset_val;
 		snd_soc_write(codec, gain_reg, val);
-		tasha_codec_config_ear_spkr_gain(codec, event, gain_reg);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		tasha_config_compander(codec, w->shift, event);
@@ -5273,7 +5213,6 @@ static int tasha_codec_enable_interpolator(struct snd_soc_dapm_widget *w,
 			val += offset_val;
 			snd_soc_write(codec, gain_reg, val);
 		}
-		tasha_codec_config_ear_spkr_gain(codec, event, gain_reg);
 		break;
 	};
 
@@ -8103,7 +8042,6 @@ static const struct snd_kcontrol_new tasha_snd_controls[] = {
 	SOC_SINGLE_SX_TLV("RX8 Digital Volume", WCD9335_CDC_RX8_RX_VOL_CTL,
 		0, -84, 40, digital_gain),
 
-#ifndef CONFIG_SOUND_CONTROL
 	SOC_SINGLE_SX_TLV("RX0 Mix Digital Volume",
 			  WCD9335_CDC_RX0_RX_VOL_MIX_CTL,
 			  0, -84, 40, digital_gain), /* -84dB min - 40dB max */
@@ -8113,7 +8051,6 @@ static const struct snd_kcontrol_new tasha_snd_controls[] = {
 	SOC_SINGLE_SX_TLV("RX2 Mix Digital Volume",
 			  WCD9335_CDC_RX2_RX_VOL_MIX_CTL,
 			  0, -84, 40, digital_gain), /* -84dB min - 40dB max */
-#endif
 	SOC_SINGLE_SX_TLV("RX3 Mix Digital Volume",
 			  WCD9335_CDC_RX3_RX_VOL_MIX_CTL,
 			  0, -84, 40, digital_gain), /* -84dB min - 40dB max */
@@ -8436,34 +8373,6 @@ static int tasha_ear_pa_gain_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static int tasha_ear_spkr_pa_gain_get(struct snd_kcontrol *kcontrol,
-				      struct snd_ctl_elem_value *ucontrol)
-{
-	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
-	struct tasha_priv *tasha = snd_soc_codec_get_drvdata(codec);
-
-	ucontrol->value.integer.value[0] = tasha->ear_spkr_gain;
-
-	dev_dbg(codec->dev, "%s: ear_spkr_gain = %ld\n", __func__,
-		ucontrol->value.integer.value[0]);
-
-	return 0;
-}
-
-static int tasha_ear_spkr_pa_gain_put(struct snd_kcontrol *kcontrol,
-				      struct snd_ctl_elem_value *ucontrol)
-{
-	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
-	struct tasha_priv *tasha = snd_soc_codec_get_drvdata(codec);
-
-	dev_dbg(codec->dev, "%s: ucontrol->value.integer.value[0]  = %ld\n",
-		__func__, ucontrol->value.integer.value[0]);
-
-	tasha->ear_spkr_gain =  ucontrol->value.integer.value[0];
-
-	return 0;
-}
-
 static int tasha_config_compander(struct snd_soc_codec *codec, int interp_n,
 				  int event)
 {
@@ -8754,18 +8663,9 @@ static const char * const tasha_ear_pa_gain_text[] = {
 	"G_0_DB", "G_M2P5_DB", "UNDEFINED", "G_M12_DB"
 };
 
-static const char * const tasha_ear_spkr_pa_gain_text[] = {
-	"G_DEFAULT", "G_0_DB", "G_1_DB", "G_2_DB", "G_3_DB", "G_4_DB",
-	"G_5_DB", "G_6_DB"
-};
-
 static const struct soc_enum tasha_ear_pa_gain_enum =
 	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(tasha_ear_pa_gain_text),
 			tasha_ear_pa_gain_text);
-
-static const struct soc_enum tasha_ear_spkr_pa_gain_enum =
-	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(tasha_ear_spkr_pa_gain_text),
-			    tasha_ear_spkr_pa_gain_text);
 
 static const struct snd_kcontrol_new tasha_analog_gain_controls[] = {
 	SOC_ENUM_EXT("EAR PA Gain", tasha_ear_pa_gain_enum,
@@ -8976,10 +8876,6 @@ static const char * const anc1_fb_mux_text[] = {
 	"ZERO", "ANC_IN_HPHR", "ANC_IN_LO2"
 };
 
-static const char * const native_mux_text[] = {
-	"OFF", "ON",
-};
-
 static const struct soc_enum spl_src0_mux_chain_enum =
 	SOC_ENUM_SINGLE(WCD9335_CDC_RX_INP_MUX_SPLINE_SRC_CFG0, 0, 3,
 			spl_src0_mux_text);
@@ -9031,22 +8927,6 @@ static const struct soc_enum rx_int7_2_mux_chain_enum =
 static const struct soc_enum rx_int8_2_mux_chain_enum =
 	SOC_ENUM_SINGLE(WCD9335_CDC_RX_INP_MUX_RX_INT8_CFG1, 0, 9,
 			rx_int_mix_mux_text);
-
-static const struct soc_enum int1_1_native_enum =
-	SOC_ENUM_SINGLE(SND_SOC_NOPM, 0, ARRAY_SIZE(native_mux_text),
-			native_mux_text);
-
-static const struct soc_enum int2_1_native_enum =
-	SOC_ENUM_SINGLE(SND_SOC_NOPM, 0, ARRAY_SIZE(native_mux_text),
-			native_mux_text);
-
-static const struct soc_enum int3_1_native_enum =
-	SOC_ENUM_SINGLE(SND_SOC_NOPM, 0, ARRAY_SIZE(native_mux_text),
-			native_mux_text);
-
-static const struct soc_enum int4_1_native_enum =
-	SOC_ENUM_SINGLE(SND_SOC_NOPM, 0, ARRAY_SIZE(native_mux_text),
-			native_mux_text);
 
 static const struct soc_enum rx_int0_1_mix_inp0_chain_enum =
 	SOC_ENUM_SINGLE(WCD9335_CDC_RX_INP_MUX_RX_INT0_CFG0, 0, 13,
@@ -9579,18 +9459,6 @@ static const struct snd_kcontrol_new rx_int7_2_mux =
 
 static const struct snd_kcontrol_new rx_int8_2_mux =
 	SOC_DAPM_ENUM("RX INT8_2 MUX Mux", rx_int8_2_mux_chain_enum);
-
-static const struct snd_kcontrol_new int1_1_native_mux =
-	SOC_DAPM_ENUM("RX INT1_1 NATIVE MUX Mux", int1_1_native_enum);
-
-static const struct snd_kcontrol_new int2_1_native_mux =
-	SOC_DAPM_ENUM("RX INT2_1 NATIVE MUX Mux", int2_1_native_enum);
-
-static const struct snd_kcontrol_new int3_1_native_mux =
-	SOC_DAPM_ENUM("RX INT3_1 NATIVE MUX Mux", int3_1_native_enum);
-
-static const struct snd_kcontrol_new int4_1_native_mux =
-	SOC_DAPM_ENUM("RX INT4_1 NATIVE MUX Mux", int4_1_native_enum);
 
 static const struct snd_kcontrol_new rx_int0_1_mix_inp0_mux =
 	SOC_DAPM_ENUM("RX INT0_1 MIX1 INP0 Mux", rx_int0_1_mix_inp0_chain_enum);
@@ -10597,14 +10465,6 @@ static const struct snd_soc_dapm_widget tasha_dapm_widgets[] = {
 				tasha_codec_configure_cpe_input,
 				SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
 
-	SND_SOC_DAPM_MUX("RX INT1_1 NATIVE MUX", SND_SOC_NOPM, 0, 0,
-		&int1_1_native_mux),
-	SND_SOC_DAPM_MUX("RX INT2_1 NATIVE MUX", SND_SOC_NOPM, 0, 0,
-		&int2_1_native_mux),
-	SND_SOC_DAPM_MUX("RX INT3_1 NATIVE MUX", SND_SOC_NOPM, 0, 0,
-		&int3_1_native_mux),
-	SND_SOC_DAPM_MUX("RX INT4_1 NATIVE MUX", SND_SOC_NOPM, 0, 0,
-		&int4_1_native_mux),
 	SND_SOC_DAPM_MUX("RX MIX TX0 MUX", SND_SOC_NOPM, 0, 0,
 		&rx_mix_tx0_mux),
 	SND_SOC_DAPM_MUX("RX MIX TX1 MUX", SND_SOC_NOPM, 0, 0,
@@ -10928,19 +10788,8 @@ static int tasha_startup(struct snd_pcm_substream *substream,
 static void tasha_shutdown(struct snd_pcm_substream *substream,
 		struct snd_soc_dai *dai)
 {
-	struct tasha_priv *tasha = snd_soc_codec_get_drvdata(dai->codec);
-
 	pr_debug("%s(): substream = %s  stream = %d\n" , __func__,
 		 substream->name, substream->stream);
-
-	if (tasha->intf_type == WCD9XXX_INTERFACE_TYPE_I2C)
-		return;
-
-	if ((substream->stream == SNDRV_PCM_STREAM_PLAYBACK) &&
-	    test_bit(SB_CLK_GEAR, &tasha->status_mask)) {
-		tasha_codec_vote_max_bw(dai->codec, false);
-		clear_bit(SB_CLK_GEAR, &tasha->status_mask);
-	}
 }
 
 static int tasha_set_decimator_rate(struct snd_soc_dai *dai,
@@ -13278,6 +13127,11 @@ static ssize_t mic_gain_store(struct kobject *kobj,
 	return count;
 }
 
+static struct kobj_attribute mic_gain_attribute =
+	__ATTR(mic_gain, 0664,
+		mic_gain_show,
+		mic_gain_store);
+
 static ssize_t earpiece_gain_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
@@ -13310,6 +13164,8 @@ static struct attribute *sound_control_attrs[] = {
 		&headphone_gain_attribute.attr,
 		&headphone_pa_gain_attribute.attr,
 		&speaker_gain_attribute.attr,
+		&mic_gain_attribute.attr,
+		&earpiece_gain_attribute.attr,
 		NULL,
 };
 
@@ -13477,21 +13333,6 @@ static int tasha_codec_probe(struct snd_soc_codec *codec)
 	control->tx_chs = ptr + sizeof(tasha_rx_chs);
 	memcpy(control->tx_chs, tasha_tx_chs, sizeof(tasha_tx_chs));
 
-	snd_soc_dapm_ignore_suspend(dapm, "AIF1 Playback");
-	snd_soc_dapm_ignore_suspend(dapm, "AIF1 Capture");
-	snd_soc_dapm_ignore_suspend(dapm, "AIF2 Playback");
-	snd_soc_dapm_ignore_suspend(dapm, "AIF2 Capture");
-
-	if (tasha->intf_type == WCD9XXX_INTERFACE_TYPE_SLIMBUS) {
-		snd_soc_dapm_ignore_suspend(dapm, "AIF3 Playback");
-		snd_soc_dapm_ignore_suspend(dapm, "AIF3 Capture");
-		snd_soc_dapm_ignore_suspend(dapm, "AIF4 Playback");
-		snd_soc_dapm_ignore_suspend(dapm, "AIF Mix Playback");
-		snd_soc_dapm_ignore_suspend(dapm, "AIF4 MAD TX");
-		snd_soc_dapm_ignore_suspend(dapm, "VIfeed");
-		snd_soc_dapm_ignore_suspend(dapm, "AIF5 CPE TX");
-	}
-
 	snd_soc_dapm_sync(dapm);
 
 	ret = tasha_setup_irqs(tasha);
@@ -13553,11 +13394,8 @@ static int tasha_codec_probe(struct snd_soc_codec *codec)
 
 err_pdata:
 	devm_kfree(codec->dev, ptr);
-	control->rx_chs = NULL;
-	control->tx_chs = NULL;
 err_hwdep:
 	devm_kfree(codec->dev, tasha->fw_data);
-	tasha->fw_data = NULL;
 err:
 	return ret;
 }
@@ -13565,11 +13403,6 @@ err:
 static int tasha_codec_remove(struct snd_soc_codec *codec)
 {
 	struct tasha_priv *tasha = snd_soc_codec_get_drvdata(codec);
-	struct wcd9xxx *control;
-
-	control = dev_get_drvdata(codec->dev->parent);
-	control->rx_chs = NULL;
-	control->tx_chs = NULL;
 
 	tasha_cleanup_irqs(tasha);
 	/* Cleanup MBHC */
@@ -14155,7 +13988,6 @@ err_clk:
 err_resmgr:
 	devm_kfree(&pdev->dev, cdc_pwr);
 err_cdc_pwr:
-	mutex_destroy(&tasha->mclk_lock);
 	devm_kfree(&pdev->dev, tasha);
 	return ret;
 }
