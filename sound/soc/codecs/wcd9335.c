@@ -13147,8 +13147,8 @@ static ssize_t headphone_gain_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
 	return snprintf(buf, PAGE_SIZE, "%d %d\n",
-		snd_soc_read(sound_control_codec_ptr, WCD9335_CDC_RX1_RX_VOL_MIX_CTL),
-		snd_soc_read(sound_control_codec_ptr, WCD9335_CDC_RX2_RX_VOL_MIX_CTL)
+		snd_soc_read(sound_control_codec_ptr, WCD9335_CDC_RX1_RX_VOL_CTL),
+		snd_soc_read(sound_control_codec_ptr, WCD9335_CDC_RX2_RX_VOL_CTL)
 	);
 }
 
@@ -13309,7 +13309,7 @@ static ssize_t earpiece_gain_store(struct kobject *kobj,
 	return count;
 }
 
-static struct kobj_attribute earpiece_gain_attribute =
+static struct kobj_attribute mic_gain_attribute =
 	__ATTR(earpiece_gain, 0664,
 		earpiece_gain_show,
 		earpiece_gain_store);
