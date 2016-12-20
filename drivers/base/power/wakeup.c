@@ -16,7 +16,6 @@
 #include <linux/debugfs.h>
 #include <linux/types.h>
 #include <linux/moduleparam.h>
-#include <linux/pm_wakeirq.h>
 #include <trace/events/power.h>
 
 #include "power.h"
