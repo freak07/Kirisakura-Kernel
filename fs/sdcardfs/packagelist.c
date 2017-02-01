@@ -140,7 +140,6 @@ appid_t is_excluded(const char *key, userid_t user)
 	return __is_excluded(&q, user);
 }
 
-
 /* Kernel has already enforced everything we returned through
  * derive_permissions_locked(), so this is used to lock down access
  * even further, such as enforcing that apps hold sdcard_rw. */
@@ -225,7 +224,7 @@ static int insert_ext_gid_entry_locked(const struct qstr *key, appid_t value)
 
 	/* An extension can only belong to one gid */
 	hash_for_each_possible_rcu(ext_to_groupid, hash_cur, hlist, hash) {
-		if (!strcasecmp(key->name, hash_cur->key.name))
+		if (qstr_case_eq(key, &hash_cur->key))
 			return -EINVAL;
 	}
 	new_entry = alloc_hashtable_entry(key, value);
@@ -244,7 +243,7 @@ static int insert_userid_exclude_entry_locked(const struct qstr *key, userid_t v
 	/* Only insert if not already present */
 	hash_for_each_possible_rcu(package_to_userid, hash_cur, hlist, hash) {
 		if (atomic_read(&hash_cur->value) == value &&
-				!strcasecmp(key->name, hash_cur->key.name))
+				qstr_case_eq(key, &hash_cur->key))
 			return 0;
 	}
 	new_entry = alloc_hashtable_entry(key, value);
@@ -348,13 +347,13 @@ static void remove_packagelist_entry_locked(const struct qstr *key)
 	HLIST_HEAD(free_list);
 
 	hash_for_each_possible_rcu(package_to_userid, hash_cur, hlist, hash) {
-		if (!strcasecmp(key->name, hash_cur->key.name)) {
+		if (qstr_case_eq(key, &hash_cur->key)) {
 			hash_del_rcu(&hash_cur->hlist);
 			hlist_add_head(&hash_cur->dlist, &free_list);
 		}
 	}
 	hash_for_each_possible_rcu(package_to_appid, hash_cur, hlist, hash) {
-		if (!strcasecmp(key->name, hash_cur->key.name)) {
+		if (qstr_case_eq(key, &hash_cur->key)) {
 			hash_del_rcu(&hash_cur->hlist);
 			hlist_add_head(&hash_cur->dlist, &free_list);
 			break;
@@ -380,7 +379,7 @@ static void remove_ext_gid_entry_locked(const struct qstr *key, gid_t group)
 	unsigned int hash = key->hash;
 
 	hash_for_each_possible_rcu(ext_to_groupid, hash_cur, hlist, hash) {
-		if (!strcasecmp(key->name, hash_cur->key.name) && atomic_read(&hash_cur->value) == group) {
+		if (qstr_case_eq(key, &hash_cur->key) && atomic_read(&hash_cur->value) == group) {
 			hash_del_rcu(&hash_cur->hlist);
 			synchronize_rcu();
 			free_hashtable_entry(hash_cur);
@@ -431,7 +430,7 @@ static void remove_userid_exclude_entry_locked(const struct qstr *key, userid_t 
 	unsigned int hash = key->hash;
 
 	hash_for_each_possible_rcu(package_to_userid, hash_cur, hlist, hash) {
-		if (!strcasecmp(key->name, hash_cur->key.name) &&
+		if (qstr_case_eq(key, &hash_cur->key) &&
 				atomic_read(&hash_cur->value) == userid) {
 			hash_del_rcu(&hash_cur->hlist);
 			synchronize_rcu();
@@ -520,7 +519,7 @@ static ssize_t package_details_excluded_userids_show(struct package_details *pac
 
 	rcu_read_lock();
 	hash_for_each_possible_rcu(package_to_userid, hash_cur, hlist, hash) {
-		if (!strcasecmp(package_details->name.name, hash_cur->key.name))
+		if (qstr_case_eq(&package_details->name, &hash_cur->key))
 			count += scnprintf(page + count, PAGE_SIZE - count,
 					"%d ", atomic_read(&hash_cur->value));
 	}
@@ -770,7 +769,7 @@ static ssize_t packages_list_show(struct packages *packages,
 					hash_cur_app->key.name, atomic_read(&hash_cur_app->value));
 		hash = hash_cur_app->key.hash;
 		hash_for_each_possible_rcu(package_to_userid, hash_cur_user, hlist, hash) {
-			if (!strcasecmp(hash_cur_app->key.name, hash_cur_user->key.name)) {
+			if (qstr_case_eq(&hash_cur_app->key, &hash_cur_user->key)) {
 				written += scnprintf(page + count + written - 1,
 					PAGE_SIZE - sizeof(errormsg) - count - written + 1,
 					" %d\n", atomic_read(&hash_cur_user->value)) - 1;
