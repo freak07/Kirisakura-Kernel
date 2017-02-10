@@ -570,25 +570,6 @@ static int mdss_mdp_kcal_update_queue(struct device *dev)
 	return 0;
 }
 
-#if defined(CONFIG_FB) && !defined(CONFIG_MMI_PANEL_NOTIFICATIONS)
-static int fb_notifier_callback(struct notifier_block *nb,
-	unsigned long event, void *data)
-{
-	int *blank;
-	struct fb_event *evdata = data;
-	struct kcal_lut_data *lut_data =
-		container_of(nb, struct kcal_lut_data, panel_nb);
-
-	if (evdata && evdata->data && event == FB_EVENT_BLANK) {
-		blank = evdata->data;
-		if (*blank == FB_BLANK_UNBLANK)
-			mdss_mdp_kcal_update_queue(&lut_data->dev);
-	}
-
-	return 0;
-}
-#endif
-
 static int kcal_ctrl_probe(struct platform_device *pdev)
 {
 	int ret;
@@ -635,15 +616,7 @@ static int kcal_ctrl_probe(struct platform_device *pdev)
 	}
 
 	return 0;
-
-out_notifier:
-#if defined(CONFIG_MMI_PANEL_NOTIFICATIONS)
-	mmi_panel_unregister_notifier(&lut_data->panel_nb);
-#elif defined(CONFIG_FB)
-	fb_unregister_client(&lut_data->panel_nb);
-#endif
-	return ret;
-}
+}	
 
 static int kcal_ctrl_remove(struct platform_device *pdev)
 {
