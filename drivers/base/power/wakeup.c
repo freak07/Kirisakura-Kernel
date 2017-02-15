@@ -16,15 +16,17 @@
 #include <linux/debugfs.h>
 #include <linux/types.h>
 #include <linux/moduleparam.h>
+#include <linux/pm_wakeirq.h>
 #include <trace/events/power.h>
 
 #include "power.h"
+#include <soc/qcom/htc_util.h>
 
-static bool enable_qcom_rx_wakelock_ws = false;
+static bool enable_qcom_rx_wakelock_ws = true;
 module_param(enable_qcom_rx_wakelock_ws, bool, 0644);
-static bool enable_wlan_extscan_wl_ws = false;
+static bool enable_wlan_extscan_wl_ws = true;
 module_param(enable_wlan_extscan_wl_ws, bool, 0644);
-static bool enable_ipa_ws = false;
+static bool enable_ipa_ws = true;
 module_param(enable_ipa_ws, bool, 0644);
 
 /*
@@ -275,6 +277,86 @@ int device_wakeup_enable(struct device *dev)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(device_wakeup_enable);
+
+/**
+ * device_wakeup_attach_irq - Attach a wakeirq to a wakeup source
+ * @dev: Device to handle
+ * @wakeirq: Device specific wakeirq entry
+ *
+ * Attach a device wakeirq to the wakeup source so the device
+ * wake IRQ can be configured automatically for suspend and
+ * resume.
+ *
+ * Call under the device's power.lock lock.
+ */
+int device_wakeup_attach_irq(struct device *dev,
+			     struct wake_irq *wakeirq)
+{
+	struct wakeup_source *ws;
+
+	ws = dev->power.wakeup;
+	if (!ws) {
+		dev_err(dev, "forgot to call call device_init_wakeup?\n");
+		return -EINVAL;
+	}
+
+	if (ws->wakeirq)
+		return -EEXIST;
+
+	ws->wakeirq = wakeirq;
+	return 0;
+}
+
+/**
+ * device_wakeup_detach_irq - Detach a wakeirq from a wakeup source
+ * @dev: Device to handle
+ *
+ * Removes a device wakeirq from the wakeup source.
+ *
+ * Call under the device's power.lock lock.
+ */
+void device_wakeup_detach_irq(struct device *dev)
+{
+	struct wakeup_source *ws;
+
+	ws = dev->power.wakeup;
+	if (ws)
+		ws->wakeirq = NULL;
+}
+
+/**
+ * device_wakeup_arm_wake_irqs(void)
+ *
+ * Itereates over the list of device wakeirqs to arm them.
+ */
+void device_wakeup_arm_wake_irqs(void)
+{
+	struct wakeup_source *ws;
+
+	rcu_read_lock();
+	list_for_each_entry_rcu(ws, &wakeup_sources, entry) {
+		if (ws->wakeirq)
+			dev_pm_arm_wake_irq(ws->wakeirq);
+	}
+	rcu_read_unlock();
+}
+
+/**
+ * device_wakeup_disarm_wake_irqs(void)
+ *
+ * Itereates over the list of device wakeirqs to disarm them.
+ */
+void device_wakeup_disarm_wake_irqs(void)
+{
+	struct wakeup_source *ws;
+
+	rcu_read_lock();
+	list_for_each_entry_rcu(ws, &wakeup_sources, entry) {
+		if (ws->wakeirq)
+			dev_pm_disarm_wake_irq(ws->wakeirq);
+	}
+	rcu_read_unlock();
+}
 
 /**
  * device_wakeup_detach - Detach a device's wakeup source object from it.
@@ -540,6 +622,10 @@ static void wakeup_source_report_event(struct wakeup_source *ws)
 		wakeup_source_activate(ws);
 }
 
+#ifdef CONFIG_PM_DEBUG
+extern char wakelock_debug_buf[];
+#endif
+
 /**
  * __pm_stay_awake - Notify the PM core of a wakeup event.
  * @ws: Wakeup source object associated with the source of the event.
@@ -552,6 +638,13 @@ void __pm_stay_awake(struct wakeup_source *ws)
 
 	if (!ws)
 		return;
+
+#ifdef CONFIG_PM_DEBUG
+	if (!strncmp(ws->name, wakelock_debug_buf, sizeof(ws->name)-1)) {
+		pr_err("%s PID: %i requests wakelock %s", current->comm, current->pid, ws->name);
+		dump_stack();
+	}
+#endif
 
 	spin_lock_irqsave(&ws->lock, flags);
 
@@ -586,6 +679,15 @@ void pm_stay_awake(struct device *dev)
 	spin_unlock_irqrestore(&dev->power.lock, flags);
 }
 EXPORT_SYMBOL_GPL(pm_stay_awake);
+
+/**
+ * wakup_source_deactivate - Mark given wakeup source as inactive.
+ * @ws: Wakeup source to handle.
+ *
+ * Update the @ws' statistics and notify the PM core that the wakeup source has
+ * become inactive by decrementing the counter of wakeup events being processed
+ * and incrementing the counter of registered wakeup events.
+ */
 
 /**
  * __pm_relax - Notify the PM core that processing of a wakeup event has ended.
@@ -959,28 +1061,32 @@ static int print_wakeup_source_stats(struct seq_file *m,
 }
 
 #ifdef CONFIG_HTC_POWER_DEBUG
-void htc_print_wakeup_source(struct wakeup_source *ws)
-{
-        if (ws->active) {
-                if (ws->timer_expires) {
-                        long timeout = ws->timer_expires - jiffies;
-                        if (timeout > 0)
-                                printk(" '%s', time left %ld ticks; ", ws->name, timeout);
-                } else
-                        printk(" '%s' ", ws->name);
-        }
-}
-
-void htc_print_active_wakeup_sources(void)
+void htc_print_active_wakeup_sources(bool print_embedded)
 {
         struct wakeup_source *ws;
+        char output[512];
+        char piece[64];
 
         printk("wakeup sources: ");
         rcu_read_lock();
-        list_for_each_entry_rcu(ws, &wakeup_sources, entry)
-                htc_print_wakeup_source(ws);
+        memset(output, 0, sizeof(output));
+        list_for_each_entry_rcu(ws, &wakeup_sources, entry) {
+            if (ws->active) {
+                memset(piece, 0, sizeof(piece));
+                if (ws->timer_expires) {
+                    long timeout = ws->timer_expires - jiffies;
+                    if (timeout > 0) {
+                        snprintf(piece, sizeof(piece), " '%s', time left %ld ticks; ", ws->name, timeout);
+                        safe_strcat(output, piece);
+                    }
+                } else {
+                    snprintf(piece, sizeof(piece), " '%s' ", ws->name);
+                    safe_strcat(output, piece);
+                }
+            }
+        }
         rcu_read_unlock();
-        printk("\n");
+        k_pr_embedded_cond(print_embedded, "[K] wakeup sources: %s\n", output);
 }
 #endif
 
