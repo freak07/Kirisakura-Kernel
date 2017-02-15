@@ -21,39 +21,6 @@
 #include "power.h"
 
 /**
- * dev_pm_attach_wake_irq - Attach device interrupt as a wake IRQ
- * @dev: Device entry
- * @irq: Device wake-up capable interrupt
- * @wirq: Wake irq specific data
- *
- * Internal function to attach either a device IO interrupt or a
- * dedicated wake-up interrupt as a wake IRQ.
- */
-static int dev_pm_attach_wake_irq(struct device *dev, int irq,
-				  struct wake_irq *wirq)
-{
-	unsigned long flags;
-	int err;
-
-	if (!dev || !wirq)
-		return -EINVAL;
-
-	spin_lock_irqsave(&dev->power.lock, flags);
-	if (dev_WARN_ONCE(dev, dev->power.wakeirq,
-			  "wake irq already initialized\n")) {
-		spin_unlock_irqrestore(&dev->power.lock, flags);
-		return -EEXIST;
-	}
-
-	err = device_wakeup_attach_irq(dev, wirq);
-	if (!err)
-		dev->power.wakeirq = wirq;
-
-	spin_unlock_irqrestore(&dev->power.lock, flags);
-	return err;
-}
-
-/**
  * dev_pm_set_wake_irq - Attach device IO interrupt as wake IRQ
  * @dev: Device entry
  * @irq: Device IO interrupt
@@ -117,38 +84,6 @@ void dev_pm_clear_wake_irq(struct device *dev)
 	kfree(wirq);
 }
 EXPORT_SYMBOL_GPL(dev_pm_clear_wake_irq);
-
-/**
- * handle_threaded_wake_irq - Handler for dedicated wake-up interrupts
- * @irq: Device specific dedicated wake-up interrupt
- * @_wirq: Wake IRQ data
- *
- * Some devices have a separate wake-up interrupt in addition to the
- * device IO interrupt. The wake-up interrupt signals that a device
- * should be woken up from it's idle state. This handler uses device
- * specific pm_runtime functions to wake the device, and then it's
- * up to the device to do whatever it needs to. Note that as the
- * device may need to restore context and start up regulators, we
- * use a threaded IRQ.
- *
- * Also note that we are not resending the lost device interrupts.
- * We assume that the wake-up interrupt just needs to wake-up the
- * device, and then device's pm_runtime_resume() can deal with the
- * situation.
- */
-static irqreturn_t handle_threaded_wake_irq(int irq, void *_wirq)
-{
-	struct wake_irq *wirq = _wirq;
-	int res;
-
-	/* We don't want RPM_ASYNC or RPM_NOWAIT here */
-	res = pm_runtime_resume(wirq->dev);
-	if (res < 0)
-		dev_warn(wirq->dev,
-			 "wake IRQ with no resume: %i\n", res);
-
-	return IRQ_HANDLED;
-}
 
 /**
  * dev_pm_set_dedicated_wake_irq - Request a dedicated wake-up interrupt
