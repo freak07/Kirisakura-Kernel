@@ -4388,10 +4388,6 @@ static int tasha_codec_hphl_dac_event(struct snd_soc_dapm_widget *w,
 		} else
 			dev_dbg(codec->dev, "%s: Failed to get mbhc impedance %d\n",
 						__func__, ret);
-			ret = 0;
-		}
-
-
 		break;
 	case SND_SOC_DAPM_POST_PMU:
 		/* 1000us required as per HW requirement */
@@ -13282,11 +13278,6 @@ static ssize_t mic_gain_store(struct kobject *kobj,
 	return count;
 }
 
-static struct kobj_attribute mic_gain_attribute =
-	__ATTR(mic_gain, 0664,
-		mic_gain_show,
-		mic_gain_store);
-
 static ssize_t earpiece_gain_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
@@ -13319,8 +13310,6 @@ static struct attribute *sound_control_attrs[] = {
 		&headphone_gain_attribute.attr,
 		&headphone_pa_gain_attribute.attr,
 		&speaker_gain_attribute.attr,
-		&mic_gain_attribute.attr,
-		&earpiece_gain_attribute.attr,
 		NULL,
 };
 
