@@ -8438,34 +8438,6 @@ static int tasha_ear_pa_gain_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static int tasha_ear_spkr_pa_gain_get(struct snd_kcontrol *kcontrol,
-				      struct snd_ctl_elem_value *ucontrol)
-{
-	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
-	struct tasha_priv *tasha = snd_soc_codec_get_drvdata(codec);
-
-	ucontrol->value.integer.value[0] = tasha->ear_spkr_gain;
-
-	dev_dbg(codec->dev, "%s: ear_spkr_gain = %ld\n", __func__,
-		ucontrol->value.integer.value[0]);
-
-	return 0;
-}
-
-static int tasha_ear_spkr_pa_gain_put(struct snd_kcontrol *kcontrol,
-				      struct snd_ctl_elem_value *ucontrol)
-{
-	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
-	struct tasha_priv *tasha = snd_soc_codec_get_drvdata(codec);
-
-	dev_dbg(codec->dev, "%s: ucontrol->value.integer.value[0]  = %ld\n",
-		__func__, ucontrol->value.integer.value[0]);
-
-	tasha->ear_spkr_gain =  ucontrol->value.integer.value[0];
-
-	return 0;
-}
-
 static int tasha_config_compander(struct snd_soc_codec *codec, int interp_n,
 				  int event)
 {
@@ -13897,7 +13869,6 @@ static void wcd_swr_ctrl_add_devices(struct work_struct *work)
 	struct tasha_swr_ctrl_data *swr_ctrl_data = NULL, *temp;
 	int ret, ctrl_num = 0;
 	struct wcd_swr_ctrl_platform_data *platdata;
-	char plat_dev_name[WCD9335_STRING_LEN];
 
 	tasha = container_of(work, struct tasha_priv,
 			     swr_add_devices_work);
