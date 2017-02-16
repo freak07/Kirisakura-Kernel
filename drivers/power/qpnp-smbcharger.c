@@ -7405,9 +7405,7 @@ static irqreturn_t usbin_uv_handler(int irq, void *_chip)
 	struct smbchg_chip *chip = _chip;
 	int aicl_level = smbchg_get_aicl_level_ma(chip);
 	int rc;
-#ifdef CONFIG_HTC_BATT
-	int vbus = pmi8994_get_usbin_voltage_now();
-#endif /* CONFIG_HTC_BATT */
+	
 	u8 reg;
 
 	rc = smbchg_read(chip, &reg, chip->usb_chgpth_base + RT_STS, 1);
