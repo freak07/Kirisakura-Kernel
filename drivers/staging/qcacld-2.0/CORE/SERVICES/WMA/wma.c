@@ -8479,8 +8479,6 @@ static VOS_STATUS wma_set_mcc_channel_time_quota
 	struct sAniSirGlobal *pMac = NULL;
 	wmi_resmgr_set_chan_time_quota_cmd_fixed_param *cmdTQ = NULL;
 	wmi_resmgr_chan_time_quota chan_quota;
-	u_int32_t channel1 = adapter_1_chan_number;
-	u_int32_t channel2 = adapter_2_chan_number;
 	u_int32_t quota_chan1 = adapter_1_quota;
 	/* Knowing quota of 1st chan., derive quota for 2nd chan. */
 	u_int32_t quota_chan2 = 100 - quota_chan1;
@@ -20171,94 +20169,6 @@ static inline void wma_free_wow_ptrn(tp_wma_handle wma, u_int8_t ptrn_id)
 }
 
 /* Converts wow wakeup reason code to text format */
-static const u8 *wma_wow_wake_reason_str(A_INT32 wake_reason, tp_wma_handle wma)
-{
-	switch (wake_reason) {
-	case WOW_REASON_UNSPECIFIED:
-		if (!wmi_get_runtime_pm_inprogress(wma->wmi_handle))
-			return "UNSPECIFIED";
-		else
-			return "RUNTIME PM resume";
-	case WOW_REASON_NLOD:
-		return "NLOD";
-	case WOW_REASON_AP_ASSOC_LOST:
-		return "AP_ASSOC_LOST";
-	case WOW_REASON_LOW_RSSI:
-		return "LOW_RSSI";
-	case WOW_REASON_DEAUTH_RECVD:
-		return "DEAUTH_RECVD";
-	case WOW_REASON_DISASSOC_RECVD:
-		return "DISASSOC_RECVD";
-	case WOW_REASON_GTK_HS_ERR:
-		return "GTK_HS_ERR";
-	case WOW_REASON_EAP_REQ:
-		return "EAP_REQ";
-	case WOW_REASON_FOURWAY_HS_RECV:
-		return "FOURWAY_HS_RECV";
-	case WOW_REASON_TIMER_INTR_RECV:
-		return "TIMER_INTR_RECV";
-	case WOW_REASON_PATTERN_MATCH_FOUND:
-		return "PATTERN_MATCH_FOUND";
-	case WOW_REASON_RECV_MAGIC_PATTERN:
-		return "RECV_MAGIC_PATTERN";
-	case WOW_REASON_P2P_DISC:
-		return "P2P_DISC";
-#ifdef FEATURE_WLAN_LPHB
-	case WOW_REASON_WLAN_HB:
-		return "WLAN_HB";
-#endif /* FEATURE_WLAN_LPHB */
-
-	case WOW_REASON_CSA_EVENT:
-		return "CSA_EVENT";
-	case WOW_REASON_PROBE_REQ_WPS_IE_RECV:
-		return "PROBE_REQ_RECV";
-	case WOW_REASON_AUTH_REQ_RECV:
-		return "AUTH_REQ_RECV";
-	case WOW_REASON_ASSOC_REQ_RECV:
-		return "ASSOC_REQ_RECV";
-	case WOW_REASON_HTT_EVENT:
-		return "WOW_REASON_HTT_EVENT";
-#ifdef FEATURE_WLAN_RA_FILTERING
-	case  WOW_REASON_RA_MATCH:
-		return "WOW_REASON_RA_MATCH";
-#endif
-	case WOW_REASON_BEACON_RECV:
-		return "WOW_REASON_IBSS_BEACON_RECV";
-#ifdef FEATURE_WLAN_AUTO_SHUTDOWN
-	case  WOW_REASON_HOST_AUTO_SHUTDOWN:
-		return "WOW_REASON_HOST_AUTO_SHUTDOWN";
-#endif
-#ifdef WLAN_FEATURE_ROAM_OFFLOAD
-	case  WOW_REASON_ROAM_HO:
-		return "WOW_REASON_ROAM_HO";
-#endif
-	case WOW_REASON_CLIENT_KICKOUT_EVENT:
-		return "WOW_REASON_CLIENT_KICKOUT_EVENT";
-
-#ifdef FEATURE_WLAN_EXTSCAN
-	case WOW_REASON_EXTSCAN:
-		return "WOW_REASON_EXTSCAN";
-#endif
-	case WOW_REASON_RSSI_BREACH_EVENT:
-		return "WOW_REASON_RSSI_BREACH_EVENT";
-
-	case WOW_REASON_NLO_SCAN_COMPLETE:
-		return "WOW_REASON_NLO_SCAN_COMPLETE";
-	case WOW_REASON_BPF_ALLOW:
-		return "WOW_REASON_BPF_ALLOW";
-	case WOW_REASON_NAN_EVENT:
-		return "WOW_REASON_NAN_EVENT";
-	case WOW_REASON_ASSOC_RES_RECV:
-		return "ASSOC_RES_RECV";
-	case WOW_REASON_REASSOC_REQ_RECV:
-		return "REASSOC_REQ_RECV";
-	case WOW_REASON_REASSOC_RES_RECV:
-		return "REASSOC_RES_RECV";
-	case WOW_REASON_ACTION_FRAME_RECV:
-		return "ACTION_FRAME_RECV";
-	}
-	return "unknown";
-}
 
 static void wma_beacon_miss_handler(tp_wma_handle wma, u_int32_t vdev_id,
 				    uint32_t rssi)
@@ -21718,76 +21628,6 @@ static inline void wma_set_wow_bus_suspend(tp_wma_handle wma, int val) {
 static inline int wma_get_wow_bus_suspend(tp_wma_handle wma) {
 
 	return adf_os_atomic_read(&wma->is_wow_bus_suspended);
-}
-
-static const u8 *wma_wow_wakeup_event_str(WOW_WAKE_EVENT_TYPE event)
-{
-	switch (event) {
-	case WOW_BMISS_EVENT:
-		return "WOW_BMISS_EVENT";
-	case WOW_BETTER_AP_EVENT:
-		return "WOW_BETTER_AP_EVENT";
-	case WOW_DEAUTH_RECVD_EVENT:
-		return "WOW_DEAUTH_RECVD_EVENT";
-	case WOW_MAGIC_PKT_RECVD_EVENT:
-		return "WOW_MAGIC_PKT_RECVD_EVENT";
-	case WOW_GTK_ERR_EVENT:
-		return "WOW_GTK_ERR_EVENT";
-	case WOW_FOURWAY_HSHAKE_EVENT:
-		return "WOW_GTK_ERR_EVENT";
-	case WOW_EAPOL_RECVD_EVENT:
-		return "WOW_EAPOL_RECVD_EVENT";
-	case WOW_NLO_DETECTED_EVENT:
-		return "WOW_NLO_DETECTED_EVENT";
-	case WOW_DISASSOC_RECVD_EVENT:
-		return "WOW_DISASSOC_RECVD_EVENT";
-	case WOW_PATTERN_MATCH_EVENT:
-		return "WOW_PATTERN_MATCH_EVENT";
-	case WOW_CSA_IE_EVENT:
-		return "WOW_CSA_IE_EVENT";
-	case WOW_PROBE_REQ_WPS_IE_EVENT:
-		return "WOW_PROBE_REQ_WPS_IE_EVENT";
-	case WOW_AUTH_REQ_EVENT:
-		return "WOW_AUTH_REQ_EVENT";
-	case WOW_ASSOC_REQ_EVENT:
-		return "WOW_ASSOC_REQ_EVENT";
-	case WOW_HTT_EVENT:
-		return "WOW_HTT_EVENT";
-	case WOW_RA_MATCH_EVENT:
-		return "WOW_RA_MATCH_EVENT";
-	case WOW_HOST_AUTO_SHUTDOWN_EVENT:
-		return "WOW_HOST_AUTO_SHUTDOWN_EVENT";
-	case WOW_IOAC_MAGIC_EVENT:
-		return "WOW_IOAC_MAGIC_EVENT";
-	case WOW_IOAC_SHORT_EVENT:
-		return "WOW_IOAC_SHORT_EVENT";
-	case WOW_IOAC_EXTEND_EVENT:
-		return "WOW_IOAC_EXTEND_EVENT";
-	case WOW_IOAC_TIMER_EVENT:
-		return "WOW_IOAC_TIMER_EVENT";
-	case WOW_DFS_PHYERR_RADAR_EVENT:
-		return "WOW_DFS_PHYERR_RADAR_EVENT";
-	case WOW_BEACON_EVENT:
-		return "WOW_BEACON_EVENT";
-	case WOW_CLIENT_KICKOUT_EVENT:
-		return "WOW_CLIENT_KICKOUT_EVENT";
-	case WOW_NAN_EVENT:
-		return "WOW_NAN_EVENT";
-	case WOW_EXTSCAN_EVENT:
-		return "WOW_EXTSCAN_EVENT";
-	case WOW_IOAC_REV_KA_FAIL_EVENT:
-		return "WOW_IOAC_REV_KA_FAIL_EVENT";
-	case WOW_IOAC_SOCK_EVENT:
-		return "WOW_IOAC_SOCK_EVENT";
-	case WOW_NLO_SCAN_COMPLETE_EVENT:
-		return "WOW_NLO_SCAN_COMPLETE_EVENT";
-	case WOW_NAN_DATA_EVENT:
-		return "WOW_NAN_DATA_EVENT";
-	case WOW_TDLS_CONN_TRACKER_EVENT:
-		return "WOW_TDLS_CONN_TRACKER_EVENT";
-	default:
-		return "UNSPECIFIED_EVENT";
-	}
 }
 
 /**
