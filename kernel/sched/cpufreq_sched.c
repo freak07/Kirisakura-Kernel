@@ -508,5 +508,4 @@ static int __init cpufreq_sched_init(void)
 	return cpufreq_register_governor(&cpufreq_gov_sched);
 }
 
-/* Try to make this the default governor */
 fs_initcall(cpufreq_sched_init);

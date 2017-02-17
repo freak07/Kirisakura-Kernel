@@ -746,10 +746,7 @@ static int cpufreq_schedutil_cb(struct cpufreq_policy *policy,
 	}
 }
 
-#ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL
-static
-#endif
-struct cpufreq_governor schedutil_gov = {
+static struct cpufreq_governor schedutil_gov = {
 	.name = "schedutil",
 	.governor = cpufreq_schedutil_cb,
 	.owner = THIS_MODULE,
@@ -759,4 +756,18 @@ static int __init sugov_register(void)
 {
 	return cpufreq_register_governor(&schedutil_gov);
 }
+
+static void __exit sugov_module_exit(void)
+{
+	cpufreq_unregister_governor(&schedutil_gov);
+} 
+
+#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL
+struct cpufreq_governor *cpufreq_default_governor(void)
+{
+	return &schedutil_gov;
+}
+#endif
+
+/* Try to make this the default governor */
 fs_initcall(sugov_register);

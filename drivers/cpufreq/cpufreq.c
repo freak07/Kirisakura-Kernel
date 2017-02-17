@@ -1083,7 +1083,7 @@ static void cpufreq_init_policy(struct cpufreq_policy *policy)
 		 policy->cpu, policy->min, policy->max);
 
 	memcpy(&new_policy, policy, sizeof(*policy));
-
+	
 	/* Update governor of new_policy to the governor used before hotplug */
 	gov = __find_governor(per_cpu(cpufreq_policy_save, policy->cpu).gov);
 	if (gov)
