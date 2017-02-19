@@ -30,11 +30,14 @@ static void inherit_derived_state(struct inode *parent, struct inode *child)
 	ci->userid = pi->userid;
 	ci->d_uid = pi->d_uid;
 	ci->under_android = pi->under_android;
+	ci->under_cache = pi->under_cache;
+	ci->under_obb = pi->under_obb;
+	set_top(ci, pi->top);
 }
 
 /* helper function for derived state */
-void setup_derived_state(struct inode *inode, perm_t perm,
-                        userid_t userid, uid_t uid, bool under_android)
+void setup_derived_state(struct inode *inode, perm_t perm, userid_t userid,
+                        uid_t uid, bool under_android, struct inode *top)
 {
 	struct sdcardfs_inode_info *info = SDCARDFS_I(inode);
 
@@ -42,12 +45,14 @@ void setup_derived_state(struct inode *inode, perm_t perm,
 	info->userid = userid;
 	info->d_uid = uid;
 	info->under_android = under_android;
+	info->under_cache = false;
+	info->under_obb = false;
+	set_top(info, top);
 }
 
 /* While renaming, there is a point where we want the path from dentry, but the name from newdentry */
-void get_derived_permission_new(struct dentry *parent, struct dentry *dentry, struct dentry *newdentry)
+void get_derived_permission_new(struct dentry *parent, struct dentry *dentry, const char *name)
 {
-	struct sdcardfs_sb_info *sbi = SDCARDFS_SB(dentry->d_sb);
 	struct sdcardfs_inode_info *info = SDCARDFS_I(dentry->d_inode);
 	struct sdcardfs_inode_info *parent_info= SDCARDFS_I(parent->d_inode);
 	appid_t appid;
@@ -56,49 +61,67 @@ void get_derived_permission_new(struct dentry *parent, struct dentry *dentry, st
 	 * the properties are maintained on its private fields
 	 * because the inode attributes will be modified with that of
 	 * its lower inode.
-	 * The derived state will be updated on the last
-	 * stage of each system call by fix_derived_permission(inode).
+	 * These values are used by our custom permission call instead
+	 * of using the inode permissions.
 	 */
 
 	inherit_derived_state(parent->d_inode, dentry->d_inode);
 
+	/* Files don't get special labels */
+	if (!S_ISDIR(dentry->d_inode->i_mode))
+		return;
 	/* Derive custom permissions based on parent and current node */
 	switch (parent_info->perm) {
 		case PERM_INHERIT:
+		case PERM_ANDROID_PACKAGE_CACHE:
 			/* Already inherited above */
 			break;
 		case PERM_PRE_ROOT:
 			/* Legacy internal layout places users at top level */
 			info->perm = PERM_ROOT;
-			info->userid = simple_strtoul(newdentry->d_name.name, NULL, 10);
+			info->userid = simple_strtoul(name, NULL, 10);
+			set_top(info, &info->vfs_inode);
 			break;
 		case PERM_ROOT:
 			/* Assume masked off by default. */
-			if (!strcasecmp(newdentry->d_name.name, "Android")) {
+			if (!strcasecmp(name, "Android")) {
 				/* App-specific directories inside; let anyone traverse */
 				info->perm = PERM_ANDROID;
 				info->under_android = true;
+				set_top(info, &info->vfs_inode);
 			}
 			break;
 		case PERM_ANDROID:
-			if (!strcasecmp(newdentry->d_name.name, "data")) {
+			if (!strcasecmp(name, "data")) {
 				/* App-specific directories inside; let anyone traverse */
 				info->perm = PERM_ANDROID_DATA;
-			} else if (!strcasecmp(newdentry->d_name.name, "obb")) {
+				set_top(info, &info->vfs_inode);
+			} else if (!strcasecmp(name, "obb")) {
 				/* App-specific directories inside; let anyone traverse */
 				info->perm = PERM_ANDROID_OBB;
+				info->under_obb = true;
+				set_top(info, &info->vfs_inode);
 				/* Single OBB directory is always shared */
-			} else if (!strcasecmp(newdentry->d_name.name, "media")) {
+			} else if (!strcasecmp(name, "media")) {
 				/* App-specific directories inside; let anyone traverse */
 				info->perm = PERM_ANDROID_MEDIA;
+				set_top(info, &info->vfs_inode);
 			}
 			break;
-		case PERM_ANDROID_DATA:
 		case PERM_ANDROID_OBB:
+		case PERM_ANDROID_DATA:
 		case PERM_ANDROID_MEDIA:
-			appid = get_appid(sbi->pkgl_id, newdentry->d_name.name);
-			if (appid != 0) {
+			info->perm = PERM_ANDROID_PACKAGE;
+			appid = get_appid(name);
+			if (appid != 0 && !is_excluded(name, parent_info->userid)) {
 				info->d_uid = multiuser_get_uid(parent_info->userid, appid);
+			}
+			set_top(info, &info->vfs_inode);
+			break;
+		case PERM_ANDROID_PACKAGE:
+			if (!strcasecmp(name, "cache")) {
+				info->perm = PERM_ANDROID_PACKAGE_CACHE;
+				info->under_cache = true;
 			}
 			break;
 	}
@@ -106,20 +129,205 @@ void get_derived_permission_new(struct dentry *parent, struct dentry *dentry, st
 
 void get_derived_permission(struct dentry *parent, struct dentry *dentry)
 {
-	get_derived_permission_new(parent, dentry, dentry);
+	get_derived_permission_new(parent, dentry, dentry->d_name.name);
 }
 
-void get_derive_permissions_recursive(struct dentry *parent) {
+static appid_t get_type(const char *name) {
+	const char *ext = strrchr(name, '.');
+	appid_t id;
+
+	if (ext && ext[0]) {
+		ext = &ext[1];
+		id = get_ext_gid(ext);
+		return id?:AID_MEDIA_RW;
+	}
+	return AID_MEDIA_RW;
+}
+
+void fixup_lower_ownership(struct dentry* dentry, const char *name) {
+	struct path path;
+	struct inode *inode;
+	struct inode *delegated_inode = NULL;
+	int error;
+	struct sdcardfs_inode_info *info;
+	struct sdcardfs_inode_info *info_top;
+	perm_t perm;
+	struct sdcardfs_sb_info *sbi = SDCARDFS_SB(dentry->d_sb);
+	uid_t uid = sbi->options.fs_low_uid;
+	gid_t gid = sbi->options.fs_low_gid;
+	struct iattr newattrs;
+
+	info = SDCARDFS_I(dentry->d_inode);
+	perm = info->perm;
+	if (info->under_obb) {
+		perm = PERM_ANDROID_OBB;
+	} else if (info->under_cache) {
+		perm = PERM_ANDROID_PACKAGE_CACHE;
+	} else if (perm == PERM_INHERIT) {
+		info_top = SDCARDFS_I(grab_top(info));
+		perm = info_top->perm;
+		release_top(info);
+	}
+
+	switch (perm) {
+		case PERM_ROOT:
+		case PERM_ANDROID:
+		case PERM_ANDROID_DATA:
+		case PERM_ANDROID_MEDIA:
+		case PERM_ANDROID_PACKAGE:
+		case PERM_ANDROID_PACKAGE_CACHE:
+			uid = multiuser_get_uid(info->userid, uid);
+			break;
+		case PERM_ANDROID_OBB:
+			uid = AID_MEDIA_OBB;
+			break;
+		case PERM_PRE_ROOT:
+		default:
+			break;
+	}
+	switch (perm) {
+		case PERM_ROOT:
+		case PERM_ANDROID:
+		case PERM_ANDROID_DATA:
+		case PERM_ANDROID_MEDIA:
+			if (S_ISDIR(dentry->d_inode->i_mode))
+				gid = multiuser_get_uid(info->userid, AID_MEDIA_RW);
+			else
+				gid = multiuser_get_uid(info->userid, get_type(name));
+			break;
+		case PERM_ANDROID_OBB:
+			gid = AID_MEDIA_OBB;
+			break;
+		case PERM_ANDROID_PACKAGE:
+			if (info->d_uid != 0)
+				gid = multiuser_get_ext_gid(info->userid, info->d_uid);
+			else
+				gid = multiuser_get_uid(info->userid, uid);
+			break;
+		case PERM_ANDROID_PACKAGE_CACHE:
+			if (info->d_uid != 0)
+				gid = multiuser_get_cache_gid(info->userid, info->d_uid);
+			else
+				gid = multiuser_get_uid(info->userid, uid);
+			break;
+		case PERM_PRE_ROOT:
+		default:
+			break;
+	}
+
+	sdcardfs_get_lower_path(dentry, &path);
+	inode = path.dentry->d_inode;
+	if (path.dentry->d_inode->i_gid.val != gid || path.dentry->d_inode->i_uid.val != uid) {
+retry_deleg:
+		newattrs.ia_valid = ATTR_GID | ATTR_UID | ATTR_FORCE;
+		newattrs.ia_uid = make_kuid(current_user_ns(), uid);
+		newattrs.ia_gid = make_kgid(current_user_ns(), gid);
+		if (!S_ISDIR(inode->i_mode))
+			newattrs.ia_valid |=
+				ATTR_KILL_SUID | ATTR_KILL_SGID | ATTR_KILL_PRIV;
+		mutex_lock(&inode->i_mutex);
+		error = security_path_chown(&path, newattrs.ia_uid, newattrs.ia_gid);
+		if (!error)
+			error = notify_change2(path.mnt, path.dentry, &newattrs, &delegated_inode);
+		mutex_unlock(&inode->i_mutex);
+		if (delegated_inode) {
+			error = break_deleg_wait(&delegated_inode);
+			if (!error)
+				goto retry_deleg;
+		}
+		if (error)
+			pr_err("sdcardfs: Failed to touch up lower fs gid/uid.\n");
+	}
+	sdcardfs_put_lower_path(dentry, &path);
+}
+
+static int descendant_may_need_fixup(struct sdcardfs_inode_info *info, struct limit_search *limit) {
+	if (info->perm == PERM_ROOT)
+		return (limit->flags & BY_USERID)?info->userid == limit->userid:1;
+	if (info->perm == PERM_PRE_ROOT || info->perm == PERM_ANDROID)
+		return 1;
+	return 0;
+}
+
+static int needs_fixup(perm_t perm) {
+	if (perm == PERM_ANDROID_DATA || perm == PERM_ANDROID_OBB
+			|| perm == PERM_ANDROID_MEDIA)
+		return 1;
+	return 0;
+}
+
+void fixup_perms_recursive(struct dentry *dentry, struct limit_search *limit) {
+	struct dentry *child;
+	struct sdcardfs_inode_info *info;
+	if (!dget(dentry))
+		return;
+	if (!dentry->d_inode) {
+		dput(dentry);
+		return;
+	}
+	info = SDCARDFS_I(dentry->d_inode);
+
+	if (needs_fixup(info->perm)) {
+		spin_lock(&dentry->d_lock);
+		list_for_each_entry(child, &dentry->d_subdirs, d_child) {
+			dget(child);
+			if (!(limit->flags & BY_NAME) || !strncasecmp(child->d_name.name, limit->name, limit->length)) {
+				if (child->d_inode) {
+					get_derived_permission(dentry, child);
+					fixup_tmp_permissions(child->d_inode);
+					dput(child);
+					break;
+				}
+			}
+			dput(child);
+		}
+		spin_unlock(&dentry->d_lock);
+	} else 	if (descendant_may_need_fixup(info, limit)) {
+		spin_lock(&dentry->d_lock);
+		list_for_each_entry(child, &dentry->d_subdirs, d_child) {
+				fixup_perms_recursive(child, limit);
+		}
+		spin_unlock(&dentry->d_lock);
+	}
+	dput(dentry);
+}
+
+void drop_recursive(struct dentry *parent) {
 	struct dentry *dentry;
+	struct sdcardfs_inode_info *info;
+	if (!parent->d_inode)
+		return;
+	info = SDCARDFS_I(parent->d_inode);
+	spin_lock(&parent->d_lock);
 	list_for_each_entry(dentry, &parent->d_subdirs, d_child) {
-		if (dentry && dentry->d_inode) {
-			mutex_lock(&dentry->d_inode->i_mutex);
-			get_derived_permission(parent, dentry);
-			fix_derived_permission(dentry->d_inode);
-			get_derive_permissions_recursive(dentry);
-			mutex_unlock(&dentry->d_inode->i_mutex);
+		if (dentry->d_inode) {
+			if (SDCARDFS_I(parent->d_inode)->top != SDCARDFS_I(dentry->d_inode)->top) {
+				drop_recursive(dentry);
+				d_drop(dentry);
+			}
 		}
 	}
+	spin_unlock(&parent->d_lock);
+}
+
+void fixup_top_recursive(struct dentry *parent) {
+	struct dentry *dentry;
+	struct sdcardfs_inode_info *info;
+
+	if (!parent->d_inode)
+		return;
+	info = SDCARDFS_I(parent->d_inode);
+	spin_lock(&parent->d_lock);
+	list_for_each_entry(dentry, &parent->d_subdirs, d_child) {
+		if (dentry->d_inode) {
+			if (SDCARDFS_I(parent->d_inode)->top != SDCARDFS_I(dentry->d_inode)->top) {
+				get_derived_permission(parent, dentry);
+				fixup_tmp_permissions(dentry->d_inode);
+				fixup_top_recursive(dentry);
+			}
+		}
+	}
+	spin_unlock(&parent->d_lock);
 }
 
 /* main function for updating derived permission */
@@ -135,7 +343,6 @@ inline void update_derived_permission_lock(struct dentry *dentry)
 	 * 1. need to check whether the dentry is updated or not
 	 * 2. remove the root dentry update
 	 */
-	mutex_lock(&dentry->d_inode->i_mutex);
 	if(IS_ROOT(dentry)) {
 		//setup_default_pre_root_state(dentry->d_inode);
 	} else {
@@ -145,8 +352,7 @@ inline void update_derived_permission_lock(struct dentry *dentry)
 			dput(parent);
 		}
 	}
-	fix_derived_permission(dentry->d_inode);
-	mutex_unlock(&dentry->d_inode->i_mutex);
+	fixup_tmp_permissions(dentry->d_inode);
 }
 
 int need_graft_path(struct dentry *dentry)
