@@ -38,12 +38,8 @@ unsigned long boosted_cpu_util(int cpu);
 #define PUMP_INC_STEP_AT_MIN_FREQ	1
 #define PUMP_INC_STEP				1
 #define PUMP_DEC_STEP_AT_MIN_FREQ	1
-#define PUMP_DEC_STEP
-#ifndef CONFIG_LGE_PM				1
+#define PUMP_DEC_STEP				1			
 #define BOOST_PERC					10
-#else
-#define BOOST_PERC					5
-#endif
 
 struct acgov_tunables {
 	struct gov_attr_set attr_set;
@@ -417,6 +413,7 @@ static unsigned int get_next_freq(struct acgov_cpu *sg_cpu, unsigned long util,
 	}
 	return next_freq;
 }
+#endif
 
 static void acgov_get_util(unsigned long *util, unsigned long *max, u64 time)
 {
