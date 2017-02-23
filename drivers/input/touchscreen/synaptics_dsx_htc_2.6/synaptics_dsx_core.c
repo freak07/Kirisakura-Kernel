@@ -137,8 +137,15 @@
 static DECLARE_WAIT_QUEUE_HEAD(syn_data_ready_wq);
 #endif
 
-static bool wakeup_gesture_changed = false;
-static bool wakeup_gesture_temp;
+#ifdef CONFIG_WAKE_GESTURES
+struct synaptics_rmi4_data *gl_rmi4_data;
+
+bool scr_suspended(void)
+{
+	struct synaptics_rmi4_data *rmi4_data = gl_rmi4_data;
+	return rmi4_data->suspend;
+}
+#endif
 
 static int synaptics_rmi4_check_status(struct synaptics_rmi4_data *rmi4_data,
 		bool *was_in_bl_mode);
@@ -1095,14 +1102,8 @@ static ssize_t synaptics_rmi4_wake_gesture_store(struct device *dev,
 
 	input = input > 0 ? 1 : 0;
 
-	if (rmi4_data->f11_wakeup_gesture || rmi4_data->f12_wakeup_gesture) {
-		if (rmi4_data->suspend) { 
-			wakeup_gesture_changed = true;
-			wakeup_gesture_temp = input;
-		} else {
-			rmi4_data->enable_wakeup_gesture = input;
-		}
-	}
+	if (rmi4_data->f11_wakeup_gesture || rmi4_data->f12_wakeup_gesture)
+		rmi4_data->enable_wakeup_gesture = input;
 
 	return count;
 }
@@ -5733,7 +5734,6 @@ static void synaptics_rmi4_f12_wg(struct synaptics_rmi4_data *rmi4_data,
 {
 	int retval;
 	unsigned char reporting_control[3];
-	struct synaptics_rmi4_f12_ctrl_27 ctrl_27;
 	struct synaptics_rmi4_f12_extra_data *extra_data;
 	struct synaptics_rmi4_fn *fhandler;
 	struct synaptics_rmi4_device_info *rmi;
@@ -5759,47 +5759,10 @@ static void synaptics_rmi4_f12_wg(struct synaptics_rmi4_data *rmi4_data,
 		return;
 	}
 
-	retval = synaptics_rmi4_reg_read(rmi4_data,
-			fhandler->full_addr.ctrl_base +
-				extra_data->ctrl27_offset,
-			ctrl_27.data,
-			sizeof(ctrl_27.data));
-	if (retval < 0) {
-		dev_err(rmi4_data->pdev->dev.parent,
-				"%s: Failed to change lpwg settings\n",
-				__func__);
-		return;
-	}
-
-	if (enable) {
+	if (enable)
 		reporting_control[2] = F12_WAKEUP_GESTURE_MODE;
-		ctrl_27.double_tap_enable = 1;
-		ctrl_27.lpwg_report_rate = 20;
-		ctrl_27.false_activation_threshold = 3;
-		ctrl_27.maximum_active_duration = 12;
-		ctrl_27.timer_1_duration = 15;
-		ctrl_27.maximum_active_duration_timeout = 10;
-	} else {
+	else
 		reporting_control[2] = F12_CONTINUOUS_MODE;
-		ctrl_27.double_tap_enable = 0;
-		ctrl_27.lpwg_report_rate = 20;
-		ctrl_27.false_activation_threshold = 3;
-		ctrl_27.maximum_active_duration = 12;
-		ctrl_27.timer_1_duration = 15;
-		ctrl_27.maximum_active_duration_timeout = 10;
-	}
-
-	retval = synaptics_rmi4_reg_write(rmi4_data,
-			fhandler->full_addr.ctrl_base +
-				extra_data->ctrl27_offset,
-			ctrl_27.data,
-			sizeof(ctrl_27.data));
-	if (retval < 0) {
-		dev_err(rmi4_data->pdev->dev.parent,
-				"%s: Failed to change lpwg settings\n",
-				__func__);
-		return;
-	}
 
 	retval = synaptics_rmi4_reg_write(rmi4_data,
 			fhandler->full_addr.ctrl_base +
@@ -6063,10 +6026,12 @@ exit:
 
 	rmi4_data->suspend = false;
 
-	if (wakeup_gesture_changed) {
-		rmi4_data->enable_wakeup_gesture = wakeup_gesture_temp;
-		wakeup_gesture_changed = false;
+#ifdef CONFIG_WAKE_GESTURES
+	if (wg_changed) {
+		wg_switch = wg_switch_temp;
+		wg_changed = false;
 	}
+#endif
 
 	return 0;
 }
